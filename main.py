@@ -1,0 +1,158 @@
+"""
+Raspberry Pi Pico - POS USB Serial Web Server
+MicroPython 1.26.1
+
+USB serial üzerinden POS mesajları alır/gönderir
+WiFi Access Point modunda web sunucusu açar
+Tüm loglar web sunucusunda görüntülenir
+"""
+
+import machine
+import uasyncio as asyncio
+import sys
+import uselect
+from wifi_setup import setup_access_point, get_ap_ip
+from web_server import start_web_server, add_log
+from pos_handler import PosWithCable
+
+try:
+    from config import VERSION, WIFI_SSID, WIFI_PASSWORD, WEB_SERVER_PORT
+except ImportError:
+    # Varsayılan değerler
+    VERSION = "1.0.0"
+    WIFI_SSID = "POS-AP"
+    WIFI_PASSWORD = "12345678"
+    WEB_SERVER_PORT = 80
+
+def print_banner():
+    """Başlangıç banner'ı"""
+    banner = """
+╔═══════════════════════════════════════════════════════╗
+║     POS USB Serial Web Server - Raspberry Pi Pico     ║
+║                   Version {}                  ║
+╚═══════════════════════════════════════════════════════╝
+""".format(VERSION)
+    print(banner)
+    add_log("=" * 60)
+    add_log("POS USB Serial Web Server Başlatılıyor...")
+    add_log("Versiyon: {}".format(VERSION))
+
+async def main():
+    """Ana fonksiyon"""
+    try:
+        print_banner()
+        
+        # 1. WiFi Access Point modunu başlat
+        add_log("WiFi Access Point başlatılıyor...")
+        ap = setup_access_point(ssid=WIFI_SSID, password=WIFI_PASSWORD)
+        ap_ip = get_ap_ip(ap)
+        add_log("WiFi AP hazır!")
+        add_log("SSID: {}".format(WIFI_SSID))
+        add_log("Şifre: {}".format(WIFI_PASSWORD))
+        add_log("IP Adresi: {}".format(ap_ip))
+        add_log("Web arayüzü: http://{}".format(ap_ip))
+        
+        # 2. USB Serial (UART) başlat
+        # Pico'da USB serial için machine.UART kullanılır
+        # GPIO 0 (TX) ve GPIO 1 (RX) kullanılabilir
+        # Veya USB CDC üzerinden direkt erişim için özel implementasyon gerekir
+        
+        # USB CDC Serial için wrapper sınıfı
+        # Not: MicroPython'da USB CDC serial için özel kütüphane gerekebilir
+        # Bu basit implementasyon ile başlıyoruz
+        
+        class USBUART:
+            """USB Serial wrapper for MicroPython"""
+            def __init__(self):
+                # USB CDC için uselect kullan
+                try:
+                    self.poll = uselect.poll()
+                    # sys.stdin için poll ekle
+                    self.poll.register(sys.stdin, uselect.POLLIN)
+                    self._has_poll = True
+                except:
+                    self._has_poll = False
+                self._buffer = bytearray()
+            
+            def any(self):
+                """Kullanılabilir byte sayısı"""
+                if self._has_poll:
+                    try:
+                        # Poll ile kontrol et (non-blocking)
+                        events = self.poll.poll(0)
+                        if events:
+                            return 1024  # En az bir byte var
+                    except:
+                        pass
+                return 0
+            
+            def read(self, n):
+                """n byte oku"""
+                try:
+                    if self._has_poll:
+                        events = self.poll.poll(0)
+                        if events:
+                            # sys.stdin'den oku
+                            data = sys.stdin.buffer.read(min(n, 1024))
+                            if data:
+                                return data
+                except Exception as e:
+                    pass
+                return b''
+            
+            def write(self, data):
+                """USB serial'e yaz"""
+                try:
+                    sys.stdout.buffer.write(data)
+                    sys.stdout.buffer.flush()
+                except Exception as e:
+                    add_log("USB yazma hatası: {}".format(str(e)))
+        
+        # Alternatif: GPIO UART kullan (USB yerine)
+        # Eğer USB CDC çalışmazsa GPIO UART kullanılabilir
+        try:
+            # GPIO UART denemesi (opsiyonel)
+            # uart = machine.UART(0, baudrate=115200, tx=machine.Pin(0), rx=machine.Pin(1))
+            # add_log("GPIO UART başlatıldı")
+            # pos = PosWithCable(uart)
+            
+            # USB Serial kullan
+            uart = USBUART()
+            pos = PosWithCable(uart)
+            add_log("USB Serial hazır (115200 baud)")
+        except Exception as e:
+            add_log("UART başlatma hatası: {}".format(str(e)))
+            # Fallback
+            uart = USBUART()
+            pos = PosWithCable(uart)
+        
+        # 4. Asenkron görevleri başlat
+        add_log("Asenkron görevler başlatılıyor...")
+        
+        # Web sunucusu görevini başlat
+        web_task = asyncio.create_task(start_web_server(WEB_SERVER_PORT))
+        
+        # USB serial okuma görevini başlat
+        serial_task = asyncio.create_task(pos.read_loop())
+        
+        add_log("Sistem hazır! Web arayüzünden logları görüntüleyebilirsiniz.")
+        add_log("=" * 60)
+        
+        # Her iki görevi de çalıştır
+        await asyncio.gather(web_task, serial_task)
+        
+    except KeyboardInterrupt:
+        add_log("Program kullanıcı tarafından durduruldu")
+    except Exception as e:
+        add_log("Kritik hata: {}".format(str(e)))
+        import sys
+        sys.print_exception(e)
+
+# Program başlat
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print("Başlatma hatası:", e)
+        import sys
+        sys.print_exception(e)
