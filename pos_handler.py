@@ -1,6 +1,7 @@
 import ujson
 import time
 import uasyncio as asyncio
+import machine
 from pos_protocol import (
     PosCableMessageType, AesEncryptorDecryptor, PosData, 
     Crc8, STX, ETX, get_enum_name
@@ -13,6 +14,18 @@ class PosWithCable:
         self.uart = uart
         self.aes_enc_dec = AesEncryptorDecryptor.get_instance()
         self.current_status = "IDLE"
+        
+        # LED pin'ini başlat (Pico W için "LED", Pico için Pin 25)
+        try:
+            # Pico W için "LED" pin'i
+            self.led = machine.Pin("LED", machine.Pin.OUT)
+        except:
+            # Pico için GPIO 25
+            try:
+                self.led = machine.Pin(25, machine.Pin.OUT)
+            except:
+                self.led = None
+                add_log("LED bulunamadi, LED blink devre disi")
         
         # Varsayılan payload'lar
         self.payloads = {
@@ -60,6 +73,20 @@ class PosWithCable:
         self.payloads[PosCableMessageType.POLL] = ujson.dumps(payload_dict)
         add_log("Status güncellendi: {}".format(new_status))
     
+    async def blink_led(self, count=1, on_time_ms=50, off_time_ms=50):
+        """LED'i blink yap (async)"""
+        if self.led is None:
+            return
+        try:
+            for _ in range(count):
+                self.led.on()
+                await asyncio.sleep_ms(on_time_ms)
+                self.led.off()
+                await asyncio.sleep_ms(off_time_ms)
+        except Exception as e:
+            # LED hatası sessizce geç
+            pass
+    
     def send(self, msg_type, msg):
         """Mesaj gönder"""
         try:
@@ -68,6 +95,16 @@ class PosWithCable:
             
             self.uart.write(enc_data)
             
+            # LED blink (basit toggle)
+            if self.led is not None:
+                try:
+                    self.led.on()
+                    # Kısa bir süre sonra kapatmak için async task oluştur
+                    # Not: send() sync olduğu için doğrudan blink yapıyoruz
+                    asyncio.create_task(self._led_off_after(50))
+                except:
+                    pass
+            
             add_log("Gönderildi: {} ({} bytes) - {}".format(
                 get_enum_name(msg_type),
                 len(enc_data),
@@ -75,6 +112,16 @@ class PosWithCable:
             ))
         except Exception as e:
             add_log("Gönderme hatası: {}".format(str(e)))
+    
+    async def _led_off_after(self, delay_ms):
+        """Belirtilen süre sonra LED'i kapat"""
+        if self.led is None:
+            return
+        try:
+            await asyncio.sleep_ms(delay_ms)
+            self.led.off()
+        except:
+            pass
     
     async def read_loop(self):
         """USB serial okuma döngüsü"""
@@ -87,6 +134,9 @@ class PosWithCable:
                 if self.uart.any():
                     data = self.uart.read(self.uart.any())
                     if data:
+                        # LED blink (veri alındığında)
+                        await self.blink_led(1, 50, 50)
+                        
                         buffer.extend(data)
                         
                         # Tüm veriyi işle

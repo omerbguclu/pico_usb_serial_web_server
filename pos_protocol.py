@@ -43,8 +43,53 @@ class AesEncryptorDecryptor:
     def __init__(self):
         # ucryptolib aes requires key to be 16, 24, or 32 bytes
         # We have 24 bytes key, so use MODE_ECB (mode=1)
-        self.aes_enc = aes(AES_KEY_CR, 1)
-        self.aes_dec = aes(AES_KEY_CR, 1)
+        # Some MicroPython versions might not support 24-byte keys
+        # In that case, we'll try to use 16 bytes (first 16 bytes)
+        key_len = len(AES_KEY_CR)
+        
+        try:
+            if key_len == 24:
+                # Try with 24-byte key first (AES-192)
+                try:
+                    self.aes_enc = aes(AES_KEY_CR, 1)
+                    self.aes_dec = aes(AES_KEY_CR, 1)
+                    self.key_length = 24
+                    # Test if it works
+                    test_data = b'\x00' * 16
+                    self.aes_enc.encrypt(test_data)
+                except (ValueError, OSError) as e:
+                    # If 24-byte key fails, try with 16-byte key (AES-128)
+                    # Use first 16 bytes
+                    key_16 = AES_KEY_CR[:16]
+                    self.aes_enc = aes(key_16, 1)
+                    self.aes_dec = aes(key_16, 1)
+                    self.key_length = 16
+                    # Test if it works
+                    test_data = b'\x00' * 16
+                    self.aes_enc.encrypt(test_data)
+            elif key_len == 16:
+                self.aes_enc = aes(AES_KEY_CR, 1)
+                self.aes_dec = aes(AES_KEY_CR, 1)
+                self.key_length = 16
+            elif key_len == 32:
+                self.aes_enc = aes(AES_KEY_CR, 1)
+                self.aes_dec = aes(AES_KEY_CR, 1)
+                self.key_length = 32
+            else:
+                # Fallback: use first 16 bytes
+                key_16 = AES_KEY_CR[:16]
+                self.aes_enc = aes(key_16, 1)
+                self.aes_dec = aes(key_16, 1)
+                self.key_length = 16
+        except Exception as e:
+            # Last resort: try with 16-byte key
+            key_16 = AES_KEY_CR[:16] if len(AES_KEY_CR) >= 16 else AES_KEY_CR + b'\x00' * (16 - len(AES_KEY_CR))
+            try:
+                self.aes_enc = aes(key_16, 1)
+                self.aes_dec = aes(key_16, 1)
+                self.key_length = 16
+            except Exception as e2:
+                raise RuntimeError("AES initialization failed with both 24-byte and 16-byte keys. Original error: {}, Final error: {}".format(e, e2))
     
     @classmethod
     def get_instance(cls):
