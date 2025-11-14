@@ -14,7 +14,7 @@ WIFI_DNS = "192.168.4.1"
 # Web Sunucu Ayarları
 WEB_SERVER_PORT = 80
 WEB_AUTO_REFRESH_SECONDS = 5  # Log otomatik yenileme süresi
-MAX_LOGS = 1000  # Maksimum saklanacak log sayısı
+MAX_LOGS = 10000  # Maksimum saklanacak log sayısı (web arayüzünde tüm loglar gösterilir)
 
 # USB Serial Ayarları
 SERIAL_BAUDRATE = 115200

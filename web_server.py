@@ -113,8 +113,8 @@ def get_logs_html():
     html += "    \n"
     html += "    <div class=\"log-container\" id=\"logs\">\n"
     
-    # Son logları ekle (en yeni üstte)
-    for log in reversed(logs[-500:]):  # Son 500 log
+    # Tüm logları ekle (en yeni üstte) - sınırlama kaldırıldı
+    for log in reversed(logs):  # Tüm loglar
         elapsed = time.ticks_ms() - log["time"]
         elapsed_sec = elapsed / 1000
         
