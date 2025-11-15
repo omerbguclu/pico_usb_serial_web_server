@@ -127,9 +127,15 @@ class PosWithCable:
         """USB serial okuma döngüsü"""
         buffer = bytearray()
         add_log("USB Serial okuma başlatıldı...")
+        loop_count = 0
         
         while True:
             try:
+                loop_count += 1
+                # Her 1000 döngüde bir durum logu bas (yaklaşık 10 saniyede bir)
+                if loop_count % 1000 == 0:
+                    add_log("USB Serial okuma döngüsü çalışıyor... (döngü: {})".format(loop_count))
+                
                 # Veri kontrol et
                 if self.uart.any():
                     data = self.uart.read(self.uart.any())

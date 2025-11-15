@@ -11,6 +11,7 @@ except ImportError:
     WEB_AUTO_REFRESH_SECONDS = 5
 
 def add_log(message):
+    print(message)
     """Yeni log ekle"""
     import time
     timestamp = time.ticks_ms()
@@ -160,6 +161,13 @@ async def handle_client(reader, writer):
                 pass
             return
         
+        # İstek geldiğinde log bas
+        try:
+            request_line = request.split(b'\r\n')[0].decode('utf-8', errors='ignore')
+            add_log("HTTP isteği alındı: {}".format(request_line))
+        except:
+            add_log("HTTP isteği alındı (parse edilemedi)")
+        
         # GET isteği mi kontrol et
         if b'GET / ' in request or b'GET / HTTP' in request or request.startswith(b'GET /'):
             try:
@@ -175,6 +183,7 @@ async def handle_client(reader, writer):
                 
                 writer.write(header.encode('utf-8'))
                 writer.write(response_bytes)
+                add_log("HTTP 200 OK yanıtı gönderildi")
             except Exception as e:
                 error_msg = "HTML olusturma hatasi: " + str(e)
                 add_log(error_msg)
@@ -184,11 +193,13 @@ async def handle_client(reader, writer):
             # Logları temizle
             try:
                 logs.clear()
+                add_log("Loglar temizlendi (POST /clear)")
                 writer.write('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK'.encode('utf-8'))
             except Exception as e:
                 add_log("Log temizleme hatasi: " + str(e))
                 writer.write('HTTP/1.1 500 Internal Server Error\r\n\r\n'.encode('utf-8'))
         else:
+            add_log("HTTP 404 Not Found yanıtı gönderildi")
             writer.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'.encode('utf-8'))
         
         try:
@@ -228,6 +239,7 @@ async def start_web_server(port=80):
         try:
             server = await asyncio.start_server(handle_client, "0.0.0.0", port)
             add_log("Web sunucusu hazır! Tarayıcıdan bağlanabilirsiniz.")
+            add_log("Sunucu dinlemede... (Port: {})".format(port))
             
             # Sunucu kapanana kadar bekle
             await server.wait_closed()
