@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 """
 Raspberry Pi Pico - POS USB Serial Web Server
 MicroPython 1.26.1
@@ -16,7 +18,7 @@ from web_server import start_web_server, add_log
 from pos_handler import PosWithCable
 
 try:
-    from config import VERSION, WIFI_SSID, WIFI_PASSWORD, WEB_SERVER_PORT
+    from config import VERSION, WIFI_SSID, WIFI_PASSWORD, WEB_SERVER_PORT, DEBUG_MODE
 except ImportError:
     # Varsayılan değerler
     VERSION = "1.0.0"
@@ -32,7 +34,8 @@ def print_banner():
 ║                   Version {}                  ║
 ╚═══════════════════════════════════════════════════════╝
 """.format(VERSION)
-    print(banner)
+    if DEBUG_MODE:
+        print(banner)
     add_log("=" * 60)
     add_log("POS USB Serial Web Server Başlatılıyor...")
     add_log("Versiyon: {}".format(VERSION))
@@ -44,13 +47,21 @@ async def main():
         
         # 1. WiFi Access Point modunu başlat
         add_log("WiFi Access Point başlatılıyor...")
-        ap = setup_access_point(ssid=WIFI_SSID, password=WIFI_PASSWORD)
-        ap_ip = get_ap_ip(ap)
-        add_log("WiFi AP hazır!")
-        add_log("SSID: {}".format(WIFI_SSID))
-        add_log("Şifre: {}".format(WIFI_PASSWORD))
-        add_log("IP Adresi: {}".format(ap_ip))
-        add_log("Web arayüzü: http://{}".format(ap_ip))
+        try:
+            ap = setup_access_point(ssid=WIFI_SSID, password=WIFI_PASSWORD)
+            ap_ip = get_ap_ip(ap)
+            add_log("WiFi AP hazır!")
+            add_log("SSID: {}".format(WIFI_SSID))
+            add_log("Şifre: {}".format(WIFI_PASSWORD))
+            add_log("IP Adresi: {}".format(ap_ip))
+            add_log("Web arayüzü: http://{}".format(ap_ip))
+        except Exception as e:
+            error_msg = "WiFi AP başlatma hatası: {}".format(str(e))
+            add_log(error_msg)
+            add_log("CYW43 modülü başlatılamadı. Lütfen cihazı yeniden başlatın.")
+            # Hata durumunda da devam et (USB serial çalışabilir)
+            ap = None
+            ap_ip = "192.168.4.1"
         
         # 2. USB Serial (UART) başlat
         # Pico'da USB serial için machine.UART kullanılır
@@ -119,6 +130,9 @@ async def main():
             # USB Serial kullan
             uart = USBUART()
             pos = PosWithCable(uart)
+            # Web sunucusuna pos handler instance'ını set et
+            from web_server import set_pos_handler
+            set_pos_handler(pos)
             add_log("USB Serial hazır (115200 baud)")
         except Exception as e:
             add_log("UART başlatma hatası: {}".format(str(e)))
@@ -129,17 +143,28 @@ async def main():
         # 4. Asenkron görevleri başlat
         add_log("Asenkron görevler başlatılıyor...")
         
-        # Web sunucusu görevini başlat
-        web_task = asyncio.create_task(start_web_server(WEB_SERVER_PORT))
+        # Web sunucusu görevini başlat (sadece WiFi başarılıysa)
+        web_task = None
+        if ap is not None:
+            web_task = asyncio.create_task(start_web_server(WEB_SERVER_PORT))
+        else:
+            add_log("WiFi olmadığı için web sunucusu başlatılmıyor.")
         
         # USB serial okuma görevini başlat
         serial_task = asyncio.create_task(pos.read_loop())
         
+        # Master mode: Her 1 saniyede bir POLL mesajı gönder
+        poll_task = asyncio.create_task(pos.poll_loop())
+        
         add_log("Sistem hazır! Web arayüzünden logları görüntüleyebilirsiniz.")
+        add_log("Master mode aktif - Her 1 saniyede bir POLL mesajı gönderilecek.")
         add_log("=" * 60)
         
-        # Her iki görevi de çalıştır
-        await asyncio.gather(web_task, serial_task)
+        # Tüm görevleri çalıştır (web_task None olabilir)
+        tasks = [serial_task, poll_task]
+        if web_task is not None:
+            tasks.append(web_task)
+        await asyncio.gather(*tasks)
         
     except KeyboardInterrupt:
         add_log("Program kullanıcı tarafından durduruldu")
@@ -150,9 +175,11 @@ async def main():
 
 # Program başlat
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print("Başlatma hatası:", e)
-        import sys
-        sys.print_exception(e)
+    while True:
+        try:
+            asyncio.run(main())
+        except Exception as e:
+            if DEBUG_MODE:
+                print("Başlatma hatası:", e)
+            import sys
+            sys.print_exception(e)

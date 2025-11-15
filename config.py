@@ -13,8 +13,10 @@ WIFI_DNS = "192.168.4.1"
 
 # Web Sunucu Ayarları
 WEB_SERVER_PORT = 80
-WEB_AUTO_REFRESH_SECONDS = 5  # Log otomatik yenileme süresi
-MAX_LOGS = 10000  # Maksimum saklanacak log sayısı (web arayüzünde tüm loglar gösterilir)
+WEB_AUTO_REFRESH_SECONDS = 5  # Log otomatik yenileme süresi (saniye)
+MAX_LOGS = 500  # Maksimum saklanacak log sayısı (bellek tasarrufu için)
+MAX_DISPLAY_LOGS = 200  # Web arayüzünde gösterilecek maksimum log sayısı (her tab için)
+SITE_NAME = "POS Log Monitor"  # Web sitesi başlığı (tarayıcı sekmesinde görünür)
 
 # USB Serial Ayarları
 SERIAL_BAUDRATE = 115200
@@ -26,3 +28,4 @@ SERIAL_TIMEOUT_MS = 10
 # Sistem Ayarları
 VERSION = "1.0.0"
 LOG_TIMESTAMP_FORMAT = "relative"  # "relative" veya "absolute"
+DEBUG_MODE = False  # True: print logları USB'ye yazdır (debug), False: print yapma (production)

@@ -14,6 +14,8 @@ class PosWithCable:
         self.uart = uart
         self.aes_enc_dec = AesEncryptorDecryptor.get_instance()
         self.current_status = "IDLE"
+        self.last_message_time = None  # Son mesaj alınma zamanı (bağlantı kontrolü için)
+        self.is_connected = False  # Bağlantı durumu
         
         # LED pin'ini başlat (Pico W için "LED", Pico için Pin 25)
         try:
@@ -149,6 +151,16 @@ class PosWithCable:
                         await self._process_data(buffer)
                         buffer = bytearray()  # Buffer'ı temizle
                 
+                # Bağlantı kontrolü: 3 saniyeden fazla mesaj gelmediyse bağlantı kesildi
+                import time
+                if self.last_message_time:
+                    elapsed = time.ticks_ms() - self.last_message_time
+                    if elapsed > 3000:  # 3 saniye
+                        if self.is_connected:
+                            self.is_connected = False
+                            add_log("Bağlantı kesildi (3 saniye mesaj yok)")
+                        self.last_message_time = None
+                
                 await asyncio.sleep_ms(10)  # CPU'yu rahatlat
                 
             except Exception as e:
@@ -202,6 +214,11 @@ class PosWithCable:
                 }))
                 return
             
+            # Bağlantı durumunu güncelle
+            import time
+            self.last_message_time = time.ticks_ms()
+            self.is_connected = True
+            
             add_log("Mesaj alındı: {} - {}".format(
                 get_enum_name(msg_type),
                 payload[:100] if payload else ""
@@ -229,6 +246,33 @@ class PosWithCable:
             add_log("İşleme hatası: {}".format(str(e)))
             import sys
             sys.print_exception(e)
+    
+    async def poll_loop(self):
+        """Master mode: Her 1 saniyede bir POLL mesajı gönder"""
+        import time
+        while True:
+            try:
+                # POLL mesajı hazırla
+                current_payload = self.payloads.get(PosCableMessageType.POLL, '{}')
+                try:
+                    payload_dict = ujson.loads(current_payload)
+                except:
+                    payload_dict = {}
+                
+                # cnt değerini güncelle
+                self.poll_cnt += 1
+                payload_dict["cnt"] = self.poll_cnt
+                payload_dict["status"] = self.current_status
+                
+                poll_payload = ujson.dumps(payload_dict)
+                self.send(PosCableMessageType.POLL, poll_payload)
+                
+                # 1 saniye bekle
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                add_log("Poll loop hatası: {}".format(str(e)))
+                await asyncio.sleep(1)
     
     async def algorithm_flow(self, msg_type, payload):
         """Mesaj tipine göre otomatik yanıt ver"""
