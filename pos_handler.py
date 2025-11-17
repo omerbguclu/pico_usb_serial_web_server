@@ -110,7 +110,7 @@ class PosWithCable:
             add_log("Gönderildi: {} ({} bytes) - {}".format(
                 get_enum_name(msg_type),
                 len(enc_data),
-                msg[:50] if msg else ""
+                msg if msg else ""
             ))
         except Exception as e:
             add_log("Gönderme hatası: {}".format(str(e)))

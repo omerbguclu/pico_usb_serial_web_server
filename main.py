@@ -114,10 +114,24 @@ async def main():
             def write(self, data):
                 """USB serial'e yaz"""
                 try:
-                    sys.stdout.buffer.write(data)
-                    sys.stdout.buffer.flush()
+                    print("Gelen veri:", data)
+                    if isinstance(data, bytes):
+                        try:
+                            data = data.decode('utf-8')
+                        except Exception as e:
+                            # UTF-8'e çevrilemeyen veriyi hex olarak göster
+                            data = "<binary: {}>".format(data.hex())
+                    print("1")
+                    sys.stdout.write(str(data))
+                    try:
+                        sys.stdout.flush()
+                    except AttributeError:
+                        pass  # flush() yoksa geç
+                    print("1")
                 except Exception as e:
-                    add_log("USB yazma hatası: {}".format(str(e)))
+                    # add_log tanımlı değilse bile hatayı göster
+                    print("USB yazma hatası:", repr(e))
+
         
         # Alternatif: GPIO UART kullan (USB yerine)
         # Eğer USB CDC çalışmazsa GPIO UART kullanılabilir

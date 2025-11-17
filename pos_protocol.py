@@ -153,7 +153,8 @@ class PosData:
         return bytes(self.frame)
 
 def get_enum_name(value):
-    for name, val in vars(PosCableMessageType).items():
+    # vars() yerine __dict__ kullan (MicroPython uyumluluğu için)
+    for name, val in PosCableMessageType.__dict__.items():
         if isinstance(val, int) and val == value:
             return name
     return "UNKNOWN"

@@ -26,20 +26,44 @@ def add_log(message, category="UART"):
     Yeni log ekle
     category: "UART" veya "HTTP"
     """
-    # Sadece DEBUG_MODE aktifse print yap (USB'ye yazma)
-    if DEBUG_MODE:
-        print(message)
-    import time
-    timestamp = time.ticks_ms()
-    log_entry = {
-        "time": timestamp,
-        "message": str(message),
-        "category": category
-    }
-    logs.append(log_entry)
-    # Eski logları temizle
-    if len(logs) > MAX_LOGS:
-        logs.pop(0)
+    try:
+        # Sadece DEBUG_MODE aktifse print yap (USB'ye yazma)
+        if DEBUG_MODE:
+            print(message)
+        
+        import time
+        timestamp = time.ticks_ms()
+        
+        # Mesajı kısalt (bellek tasarrufu)
+        msg_str = str(message)
+        if len(msg_str) > 200:  # Mesajı 200 karakter ile sınırla
+            msg_str = msg_str[:200] + "..."
+        
+        log_entry = {
+            "time": timestamp,
+            "message": msg_str,
+            "category": category
+        }
+        logs.append(log_entry)
+        
+        # Eski logları temizle (bellek tasarrufu için daha agresif)
+        while len(logs) > MAX_LOGS:
+            logs.pop(0)
+            
+    except MemoryError:
+        # Bellek hatası durumunda en eski logları temizle
+        try:
+            # Yarısını sil
+            remove_count = len(logs) // 2
+            for _ in range(remove_count):
+                if logs:
+                    logs.pop(0)
+        except:
+            # Hala hata varsa tüm logları temizle
+            logs.clear()
+    except Exception:
+        # Diğer hataları sessizce geç (log ekleyemezsek sistem çalışmaya devam etsin)
+        pass
 
 def get_logs_html():
     """Logları HTML formatında döndür"""
@@ -539,11 +563,32 @@ async def handle_client(reader, writer):
                 if pos_handler_instance and 'msg_type' in data and 'payload' in data:
                     # Mesaj tipini bul
                     msg_type_name = data['msg_type']
-                    for msg_type_val, msg_type_enum in PosCableMessageType.__dict__.items():
-                        if msg_type_val == msg_type_name or get_enum_name(msg_type_enum) == msg_type_name:
-                            pos_handler_instance.payloads[msg_type_enum] = data['payload']
-                            add_log("Payload güncellendi: {}".format(msg_type_name), "HTTP")
-                            break
+                    # PosCableMessageType enum değerlerini kontrol et
+                    msg_type_found = None
+                    if msg_type_name == "ACK":
+                        msg_type_found = PosCableMessageType.ACK
+                    elif msg_type_name == "NACK":
+                        msg_type_found = PosCableMessageType.NACK
+                    elif msg_type_name == "POLL":
+                        msg_type_found = PosCableMessageType.POLL
+                    elif msg_type_name == "PRINT":
+                        msg_type_found = PosCableMessageType.PRINT
+                    elif msg_type_name == "PAYMENT_START":
+                        msg_type_found = PosCableMessageType.PAYMENT_START
+                    elif msg_type_name == "PAYMENT_INFO":
+                        msg_type_found = PosCableMessageType.PAYMENT_INFO
+                    elif msg_type_name == "SETTLEMENT_START":
+                        msg_type_found = PosCableMessageType.SETTLEMENT_START
+                    elif msg_type_name == "SETTLEMENT_INFO":
+                        msg_type_found = PosCableMessageType.SETTLEMENT_INFO
+                    elif msg_type_name == "PAYMENT_FAILED":
+                        msg_type_found = PosCableMessageType.PAYMENT_FAILED
+                    elif msg_type_name == "DEVICE_INFO":
+                        msg_type_found = PosCableMessageType.DEVICE_INFO
+                    
+                    if msg_type_found is not None:
+                        pos_handler_instance.payloads[msg_type_found] = data['payload']
+                        add_log("Payload güncellendi: {}".format(msg_type_name), "HTTP")
                 
                 writer.write('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK'.encode('utf-8'))
             except Exception as e:
