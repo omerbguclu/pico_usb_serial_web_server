@@ -12,25 +12,29 @@ from Crypto.Random import get_random_bytes
 import time
 import serial
 import serial.tools.list_ports
+import sys
 
 
 class ComPortSelector:
     def __init__(self):
-        self.selected_port = None
-        self.window = tk.Toplevel()
-        self.window.title("COM Port Seçimi")
-        self.window.geometry("300x150")
-        self.window.grab_set()
+        self.selected_port = "/dev/ttyGS0"
+        # self.window = tk.Toplevel()
+        # self.window.title("COM Port Seçimi")
+        # self.window.geometry("300x150")
+        # self.window.grab_set()
 
-        ports = [port.device for port in serial.tools.list_ports.comports()]
-        ttk.Label(self.window, text="Lütfen COM port seçin:").pack(pady=10)
+        # ports = [port.device for port in serial.tools.list_ports.comports()]
+        
+        # # Linux'ta ttyGS0 varsa ekle
+        # if sys.platform.startswith("linux"):
+        #     ports += ["/dev/ttyGS0"]
 
-        self.combo = ttk.Combobox(self.window, values=ports, state="readonly")
-        self.combo.pack()
+        # ttk.Label(self.window, text="Lütfen COM port seçin:").pack(pady=10)
+        # self.combo = ttk.Combobox(self.window, values=ports, state="readonly")
+        # self.combo.pack()
+        # ttk.Button(self.window, text="Devam", command=self.confirm_selection).pack(pady=10)
 
-        ttk.Button(self.window, text="Devam", command=self.confirm_selection).pack(pady=10)
-
-        self.window.wait_window()
+        # self.window.wait_window()
 
     def confirm_selection(self):
         self.selected_port = self.combo.get()
@@ -38,6 +42,7 @@ class ComPortSelector:
 
     def get_selected_port(self):
         return self.selected_port
+
 
 STX, ETX = 0x87, 0x88
 class TypeOfData:
@@ -50,50 +55,33 @@ class TypeOfData:
     SETTLEMENT_START_REQUEST = 0x6A
     SETTLEMENT_INFO = 0x6B
     PAYMENT_FAILED_INFO = 0x6C
-    SETTLEMENT_WAITING = 0x71
     DEVICE_INFO = 0x6D
-    # Runtime status notifications from Android (not used for detection anymore)
-    PAYMENT_IN_PROGRESS = 0x96  # 150
-    PAYMENT_COMPLETED = 0x97    # 151
-    PAYMENT_FAILED = 0x98       # 152
 
-class FMCommunication:
-    def fm_widgets(self):
-       
-        # Data Entry (additional data to send)
-        self.data_label = tk.Label(self.tab1, text="Data:")
-        self.data_label.grid(row=3, column=0)
-        self.data_entry = tk.Entry(self.tab1, width=50)
-        self.data_entry.grid(row=3, column=1, columnspan=3)
+STATUS_OPTIONS = [
+    "IDLE",
+    "PAYMENT_WAITING",
+    "PAYMENT_CONTINUE",
+    "PAYMENT_COMPLETED",
+    "PAYMENT_FAILED",
+    "PAYMENT_CANCELED",
+    "SETTLEMENT_WAITING",
+    "SETTLEMENT_COMPLETED",
+    "SETTLEMENT_FAILED"
+]
 
-        # Get Total Z Report number
-        self.button_z_report_number = tk.Button(self.tab1, text="Kayıtlı Z Sayısı", command=lambda: self.send_message(TypeOfData.ZREPORTNUMBER))
-        self.button_z_report_number.grid(row=5, column=1)
-        self.button_z_report_number.config(state=tk.DISABLED)  # Initially disabled until a client connects
-        
-        # Get data of Z Report
-        self.button_z_report_data = tk.Button(self.tab1, text="Belirli Z raporu Datası", command=lambda: self.send_message(TypeOfData.ZREPORTDATA))
-        self.button_z_report_data.grid(row=5, column=2)
-        self.button_z_report_data.config(state=tk.DISABLED)  # Initially disabled until a client connects
+DEFAULT_PAYLOADS = {
+    TypeOfData.POLL: json.dumps({"status": "IDLE"}),
+    TypeOfData.PAYMENT_START_REQUEST: json.dumps({"price": "1453", "transactionType": "TRN_TYPE_SALE"}),
+    TypeOfData.PAYMENT_INFO: json.dumps({}),
+    TypeOfData.SETTLEMENT_START_REQUEST: json.dumps({}),
+    TypeOfData.SETTLEMENT_INFO: json.dumps({}),
+    TypeOfData.PAYMENT_FAILED_INFO: json.dumps({}),
+    TypeOfData.PRINT_REQUEST: json.dumps({}),
+    TypeOfData.DEVICE_INFO: json.dumps({"pykMaliNo": "BCK00000010"})
+}
 
-        # Get all data of FM
-        self.button_dump = tk.Button(self.tab1, text="Dump FM", command=lambda: self.send_message(TypeOfData.DUMPALL))
-        self.button_dump.grid(row=5, column=3)
-        self.button_dump.config(state=tk.DISABLED)  # Initially disabled until a client connects
 
-        # Get last cumulative values
-        self.button_cumulative = tk.Button(self.tab1, text="Kümülatif", command=lambda: self.send_message(TypeOfData.CUMULATIVE))
-        self.button_cumulative.grid(row=5, column=4)
-        self.button_cumulative.config(state=tk.DISABLED)  # Initially disabled until a client connects
-
-class DailyMemory:
-    def dm_widgets(self):
-        # get all data of DM
-        self.button_dm_get_all_data = tk.Button(self.tab2, text="Dump DM", command=lambda: TCPServerApp.send_message(self, TypeOfData.DMDUMP))
-        self.button_dm_get_all_data.grid(row=5, column=1)
-        
-    
-class TCPServerApp:
+class PosSerialCommApp:
     def __init__(self, root):
         self.root = root
         self.root.title("ECR Connect PC - ECP")
@@ -103,76 +91,30 @@ class TCPServerApp:
         self.com_label.grid(row=0, column=0, padx=5, pady=5)
 
         # Connect/Disconnect buttons
-        self.start_button = tk.Button(root, text="Bağlan", command=self.start_server)
+        self.start_button = tk.Button(root, text="Bağlan", command=self.start_connection)
         self.start_button.grid(row=0, column=2, padx=5, pady=5)
 
-        self.stop_button = tk.Button(root, text="Bağlantıyı Kes", command=self.stop_server, state=tk.DISABLED)
+        self.stop_button = tk.Button(root, text="Bağlantıyı Kes", command=self.stop_connection, state=tk.DISABLED)
         self.stop_button.grid(row=0, column=3, padx=5, pady=5)
 
         # Clear text box
         self.clear_button = tk.Button(root, text="Temizle", command=self.clear_textbox)
         self.clear_button.grid(row=0, column=4, padx=5, pady=5)
 
-        # Action buttons (placed into a uniform grid frame)
-        self.buttons_frame = tk.Frame(root)
-        self.buttons_frame.grid(row=1, column=0, columnspan=5, padx=8, pady=8, sticky="nsew")
+        # Payload editors
+        self.payload_frame = tk.LabelFrame(root, text="Mesaj Kontrolü")
+        self.payload_frame.grid(row=1, column=0, columnspan=5, padx=8, pady=8, sticky="nsew")
+        root.grid_rowconfigure(1, weight=1)
+        self.payload_texts = {}
+        self.label_frames = {}
+        self.payload_controls = {}
+        self.create_payload_editors()
+        self.set_payload_controls_state(False)
 
-        btn_opts = {"width": 18, "height": 2}
-        self.idle_button = tk.Button(self.buttons_frame, text="IDLE", command=self.send_idle, **btn_opts)
-        self.idle_button.config(state=tk.DISABLED)
-
-        self.sale_button = tk.Button(self.buttons_frame, text="Satış", command=self.send_sale, **btn_opts)
-        self.sale_button.config(state=tk.DISABLED)
-
-        self.payment_waiting_button = tk.Button(self.buttons_frame, text="Ödeme Bekleniyor", command=self.send_payment_waiting, **btn_opts)
-        self.payment_waiting_button.config(state=tk.DISABLED)
-
-        self.payment_info_button = tk.Button(self.buttons_frame, text="PAYMENT_INFO", command=self.send_payment_info, **btn_opts)
-        self.payment_info_button.config(state=tk.DISABLED)
-
-        self.settlement_button = tk.Button(self.buttons_frame, text="SETTLEMENT", command=self.send_settlement, **btn_opts)
-        self.settlement_button.config(state=tk.DISABLED)
-
-        self.settlement_info_button = tk.Button(self.buttons_frame, text="SETTLEMENT_INFO", command=self.send_settlement_info, **btn_opts)
-        self.settlement_info_button.config(state=tk.DISABLED)
-
-        self.print_info_button = tk.Button(self.buttons_frame, text="Print", command=self.send_print_info, **btn_opts)
-        self.print_info_button.config(state=tk.DISABLED)
-
-        self.device_info_button = tk.Button(self.buttons_frame, text="DEVICE_INFO", command=self.send_device_info, **btn_opts)
-        self.device_info_button.config(state=tk.DISABLED)
-        self.payment_failed_info_button = tk.Button(self.buttons_frame, text="PAYMENT_FAILED_INFO", command=self.send_payment_failed_info, **btn_opts)
-        self.payment_failed_info_button.config(state=tk.DISABLED)
-        self.settlement_waiting_button = tk.Button(self.buttons_frame, text="SETTLEMENT_WAITING", command=self.send_settlement_waiting, **btn_opts)
-        self.settlement_waiting_button.config(state=tk.DISABLED)
-
-        # New: Sale Scenario button
-        self.sale_scenario_button = tk.Button(self.buttons_frame, text="SATIŞ ÖRNEĞİ", command=self.run_sale_scenario, **btn_opts)
-        self.sale_scenario_button.config(state=tk.DISABLED)
-
-        # place buttons in 3 columns
-        self.action_buttons = [
-            self.idle_button,
-            self.sale_button,
-            self.payment_waiting_button,
-            self.payment_info_button,
-            self.settlement_button,
-            self.settlement_info_button,
-            self.print_info_button,
-            self.device_info_button,
-            self.payment_failed_info_button,
-            self.settlement_waiting_button,
-            self.sale_scenario_button,
-        ]
-        for i, b in enumerate(self.action_buttons):
-            r, c = divmod(i, 3)
-            b.grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
-        for c in range(3):
-            self.buttons_frame.grid_columnconfigure(c, weight=1)
-
-        # Messages Text Area (moved below buttons)
-        self.messages_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=100, height=40)
+        # Messages Text Area
+        self.messages_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=100, height=12)
         self.messages_area.grid(row=2, column=0, columnspan=5, padx=8, pady=8, sticky="nsew")
+        root.grid_rowconfigure(2, weight=1)
 
         # Serial bağlantı yönetimi
         self.serial_conn = None
@@ -189,11 +131,147 @@ class TCPServerApp:
         self.mismatch_event = threading.Event()
         self.expected_resp_type = None
 
-    def set_action_buttons_state(self, state):
-        for btn in self.action_buttons:
-            btn.config(state=state)
+    def create_payload_editors(self):
+        self.auto_poll_var = tk.BooleanVar(value=False)
+        self.auto_poll_job = None
 
-    def start_server(self):
+        top_controls = tk.Frame(self.payload_frame)
+        top_controls.pack(fill="x", padx=5, pady=5)
+        tk.Checkbutton(
+            top_controls,
+            text="Auto POLL (her 1 saniyede bir)",
+            variable=self.auto_poll_var,
+            command=self.toggle_auto_poll
+        ).pack(side=tk.LEFT, padx=5)
+        self.sale_scenario_button = tk.Button(top_controls, text="Satış Senaryosu", command=self.run_sale_scenario, state=tk.DISABLED)
+        self.sale_scenario_button.pack(side=tk.LEFT, padx=5)
+
+        self.payload_canvas = tk.Canvas(self.payload_frame, height=360)
+        self.payload_canvas.pack(side=tk.LEFT, fill="both", expand=True)
+        scrollbar = tk.Scrollbar(self.payload_frame, orient="vertical", command=self.payload_canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill="y")
+        self.payload_canvas.configure(yscrollcommand=scrollbar.set)
+        self.payload_inner = tk.Frame(self.payload_canvas)
+        self.payload_canvas.create_window((0, 0), window=self.payload_inner, anchor="nw")
+        self.payload_inner.bind("<Configure>", lambda e: self.payload_canvas.configure(scrollregion=self.payload_canvas.bbox("all")))
+
+        self.poll_status_var = tk.StringVar(value="IDLE")
+
+        payload_configs = [
+            {"type": TypeOfData.POLL, "title": "POLL"},
+            {"type": TypeOfData.PAYMENT_START_REQUEST, "title": "PAYMENT_START"},
+            {"type": TypeOfData.PAYMENT_INFO, "title": "PAYMENT_INFO"},
+            {"type": TypeOfData.SETTLEMENT_START_REQUEST, "title": "SETTLEMENT_START"},
+            {"type": TypeOfData.SETTLEMENT_INFO, "title": "SETTLEMENT_INFO"},
+            {"type": TypeOfData.PAYMENT_FAILED_INFO, "title": "PAYMENT_FAILED_INFO"},
+            {"type": TypeOfData.PRINT_REQUEST, "title": "PRINT"},
+            {"type": TypeOfData.DEVICE_INFO, "title": "DEVICE_INFO"}
+        ]
+
+        for idx, cfg in enumerate(payload_configs):
+            self.create_payload_row(idx, cfg["type"], cfg["title"])
+
+    def create_payload_row(self, row_idx, msg_type, title):
+        row_frame = tk.Frame(self.payload_inner, borderwidth=1, relief="groove", padx=4, pady=4)
+        row_frame.grid(row=row_idx, column=0, sticky="ew", pady=3)
+        row_frame.grid_columnconfigure(2, weight=1)
+        row_frame.default_bg = row_frame.cget("bg")
+        row_frame.after_id = None
+        label = tk.Label(row_frame, text=title, width=18, anchor="w")
+        label.grid(row=0, column=0, sticky="w")
+        control_frame = tk.Frame(row_frame)
+        control_frame.grid(row=0, column=1, padx=5, sticky="nw")
+        send_btn = tk.Button(control_frame, text="Gönder", width=12, command=lambda t=msg_type: self.send_from_editor(t), state=tk.DISABLED)
+        send_btn.pack(fill="x")
+        if msg_type == TypeOfData.POLL:
+            status_combo = ttk.Combobox(control_frame, values=STATUS_OPTIONS, state="readonly", width=16)
+            status_combo.set("IDLE")
+            status_combo.pack(pady=3)
+            tk.Button(control_frame, text="Durumu Uygula", command=lambda: self.apply_poll_status(status_combo.get())).pack(fill="x")
+            self.poll_status_combo = status_combo
+        text = tk.Text(row_frame, width=70, height=3, wrap=tk.WORD)
+        text.insert("1.0", self.get_default_payload(msg_type))
+        text.grid(row=0, column=2, sticky="ew")
+        self.payload_texts[msg_type] = text
+        self.label_frames[msg_type] = row_frame
+        self.payload_controls[msg_type] = {"button": send_btn, "text": text}
+
+    def get_default_payload(self, msg_type):
+        return DEFAULT_PAYLOADS.get(msg_type, "{}")
+
+    def set_payload_text(self, msg_type, content):
+        widget = self.payload_texts.get(msg_type)
+        if widget:
+            widget.delete("1.0", tk.END)
+            widget.insert("1.0", content)
+
+    def get_payload_text(self, msg_type):
+        widget = self.payload_texts.get(msg_type)
+        if widget:
+            return widget.get("1.0", tk.END).strip()
+        return "{}"
+
+    def send_from_editor(self, msg_type):
+        payload = self.get_payload_text(msg_type)
+        if not payload:
+            payload = "{}"
+        self.flash_message_type(msg_type)
+        self.send_message(msg_type, payload)
+
+    def apply_poll_status(self, status):
+        self.poll_status_var.set(status)
+        payload_text = self.get_payload_text(TypeOfData.POLL)
+        try:
+            payload = json.loads(payload_text) if payload_text else {}
+        except json.JSONDecodeError:
+            payload = {}
+        payload["status"] = status
+        self.set_payload_text(TypeOfData.POLL, json.dumps(payload, ensure_ascii=False))
+        self.append_message(f"POLL status güncellendi → {status}")
+
+    def flash_message_type(self, msg_type):
+        frame = self.label_frames.get(msg_type)
+        if not frame:
+            return
+        if getattr(frame, "after_id", None):
+            frame.after_cancel(frame.after_id)
+        original = getattr(frame, "default_bg", frame.cget("bg"))
+        frame.config(bg="#ffe08a")
+        def reset():
+            frame.config(bg=original)
+            frame.after_id = None
+        frame.after_id = frame.after(400, reset)
+
+    def toggle_auto_poll(self):
+        if self.auto_poll_var.get():
+            if not (self.serial_conn and self.serial_conn.is_open):
+                messagebox.showwarning("Auto POLL", "Önce COM bağlantısı kurmalısınız.")
+                self.auto_poll_var.set(False)
+                return
+            self.schedule_auto_poll()
+        else:
+            if self.auto_poll_job:
+                self.root.after_cancel(self.auto_poll_job)
+                self.auto_poll_job = None
+
+    def schedule_auto_poll(self):
+        if not self.auto_poll_var.get():
+            self.auto_poll_job = None
+            return
+        if self.serial_conn and self.serial_conn.is_open:
+            self.send_from_editor(TypeOfData.POLL)
+        self.auto_poll_job = self.root.after(1000, self.schedule_auto_poll)
+
+    def set_payload_controls_state(self, enabled):
+        state = tk.NORMAL if enabled else tk.DISABLED
+        for info in self.payload_controls.values():
+            info["button"].config(state=state)
+        if hasattr(self, "poll_status_combo"):
+            self.poll_status_combo.config(state="readonly" if enabled else "disabled")
+        if hasattr(self, "sale_scenario_button"):
+            self.sale_scenario_button.config(state=state)
+
+    def start_connection(self):
         selector = ComPortSelector()
         port = selector.get_selected_port()
         if not port:
@@ -203,7 +281,7 @@ class TCPServerApp:
             self.selected_port = port
             self.com_label.config(text=f"Seçilen COM: {port}")
             self.append_message(f"COM port bağlantısı açıldı: {port}")
-            self.set_action_buttons_state(tk.NORMAL)
+            self.set_payload_controls_state(True)
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
             self.is_running = True
@@ -212,7 +290,7 @@ class TCPServerApp:
             messagebox.showerror("Bağlantı Hatası", str(e))
             self.serial_conn = None
 
-    def stop_server(self):
+    def stop_connection(self):
         self.is_running = False
         if self.serial_conn and self.serial_conn.is_open:
             try:
@@ -222,12 +300,19 @@ class TCPServerApp:
         self.serial_conn = None
         self.selected_port = None
         self.com_label.config(text="Seçilen COM: (bağlı değil)")
-        self.set_action_buttons_state(tk.DISABLED)
+        self.set_payload_controls_state(False)
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
+        if hasattr(self, "auto_poll_job") and self.auto_poll_job:
+            self.root.after_cancel(self.auto_poll_job)
+            self.auto_poll_job = None
+        if hasattr(self, "auto_poll_var"):
+            self.auto_poll_var.set(False)
         self.append_message("Bağlantı sonlandırıldı.")
 
     def send_message(self, typeOfDataPrm: int, msg):
+        if not msg:
+            msg = "{}"
         if self.serial_conn and self.serial_conn.is_open:
             # Beklenen cevap tipini POLL ya da PAYMENT_START için ayarlayalım
             with self._lock:
@@ -295,6 +380,9 @@ class TCPServerApp:
                         continue
                     cursor += 1
                     msg_type = dec[cursor]
+                    print("1")
+                    self.flash_message_type(msg_type)
+                    print("2")
                     type_name = self.type_name_of(msg_type)
                     cursor += 1
                     data_len = int.from_bytes(dec[cursor:cursor+4], byteorder='big')
@@ -358,7 +446,7 @@ class TCPServerApp:
         except Exception as e:
             self.append_message(f"Error: {e}")
         finally:
-            self.stop_server()
+            self.stop_connection()
 
     def append_message(self, message):
         """Append a message to the text area."""
@@ -377,11 +465,7 @@ class TCPServerApp:
             TypeOfData.SETTLEMENT_START_REQUEST: "SETTLEMENT_START",
             TypeOfData.SETTLEMENT_INFO: "SETTLEMENT_INFO",
             TypeOfData.PAYMENT_FAILED_INFO: "PAYMENT_FAILED_INFO",
-            TypeOfData.SETTLEMENT_WAITING: "SETTLEMENT_WAITING",
-            TypeOfData.DEVICE_INFO: "DEVICE_INFO",
-            TypeOfData.PAYMENT_IN_PROGRESS: "PAYMENT_IN_PROGRESS",
-            TypeOfData.PAYMENT_COMPLETED: "PAYMENT_COMPLETED",
-            TypeOfData.PAYMENT_FAILED: "PAYMENT_FAILED",
+            TypeOfData.DEVICE_INFO: "DEVICE_INFO"
         }
         return mapping.get(v, f"0x{v:02X}")
 
@@ -389,52 +473,35 @@ class TCPServerApp:
         self.messages_area.delete('1.0', tk.END)
 
     def send_idle(self):
-        self.send_message(TypeOfData.POLL, json.dumps({
-            "status": "IDLE"
-        }))
+        self.apply_poll_status("IDLE")
+        self.send_from_editor(TypeOfData.POLL)
 
     def send_payment_waiting(self):
-        self.send_message(TypeOfData.POLL, json.dumps({
-            "status": "PAYMENT_WAITING"
-        }))
+        self.apply_poll_status("PAYMENT_WAITING")
+        self.send_from_editor(TypeOfData.POLL)
 
         
     def send_settlement_info(self):
-        # Boş istek
-        self.send_message(TypeOfData.SETTLEMENT_INFO, json.dumps({}))
+        self.send_from_editor(TypeOfData.SETTLEMENT_INFO)
 
 
     def send_sale(self):
-        self.send_message(TypeOfData.PAYMENT_START_REQUEST, json.dumps({
-            "price": "1453",
-            "transactionType": "TRN_TYPE_SALE"
-        }))
+        self.send_from_editor(TypeOfData.PAYMENT_START_REQUEST)
 
     def send_payment_info(self):
-        self.send_message(TypeOfData.PAYMENT_INFO, json.dumps({
-        }))
+        self.send_from_editor(TypeOfData.PAYMENT_INFO)
 
     def send_settlement(self):
-        self.send_message(TypeOfData.SETTLEMENT_START_REQUEST, json.dumps({
-        }))
+        self.send_from_editor(TypeOfData.SETTLEMENT_START_REQUEST)
 
     def send_print_info(self):
-        self.send_message(TypeOfData.PRINT_REQUEST, json.dumps({    
-        }))
+        self.send_from_editor(TypeOfData.PRINT_REQUEST)
 
     def send_device_info(self):
-        self.send_message(TypeOfData.DEVICE_INFO, json.dumps({
-            "pykMaliNo": "BCK00000010"
-        }))
+        self.send_from_editor(TypeOfData.DEVICE_INFO)
 
     def send_payment_failed_info(self):
-        # Boş istek
-        self.send_message(TypeOfData.PAYMENT_FAILED_INFO, json.dumps({}))
-
-    def send_settlement_waiting(self):
-        self.send_message(TypeOfData.SETTLEMENT_WAITING, json.dumps({
-            "status": "SETTLEMENT_WAITING"
-        }))
+        self.send_from_editor(TypeOfData.PAYMENT_FAILED_INFO)
 
     # New: Satış örneği akışı
     def run_sale_scenario(self):
@@ -582,5 +649,5 @@ aes_enc_dec = AesEncryptorDecryptor.get_instance()
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = TCPServerApp(root)
+    app = PosSerialCommApp(root)
     root.mainloop()
